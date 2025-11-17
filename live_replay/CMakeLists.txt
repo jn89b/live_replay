@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.5)
 
 #change name of package to this
-project(ros2_template_package)
+project(live_replay)
 # Default to C++14
 if(NOT CMAKE_CXX_STANDARD)
   set(CMAKE_CXX_STANDARD 14)
@@ -50,11 +50,7 @@ install(TARGETS
 ament_python_install_package(${PROJECT_NAME})
 # Install Python executables
 install(PROGRAMS
-  scripts/pub_example.py
-  scripts/sub_example.py
-  scripts/goal_vis.py
-  scripts/target_estimator.py
-  scripts/guidance_publisher.py
+  scripts/replay_commands.py
   # scripts/client_member_function.py
   # scripts/service_member_function.py
   DESTINATION lib/${PROJECT_NAME}
