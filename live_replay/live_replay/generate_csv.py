@@ -12,8 +12,11 @@ class FlightParser:
     def __init__(self,
                  log_path: str) -> None:
         self.log_path: str = log_path
+        # get current directory
+        self.current_dir = os.path.dirname(os.path.abspath(__file__))
+        self.full_path = os.path.join(self.current_dir, log_path)
         self.binary_log: str = DFReader.DFReader_binary(
-            filename=log_path)
+            filename=self.full_path)
         # Peek what’s available:
         print("Message types present:", sorted(
             [fmt.name for fmt in self.binary_log.formats.values()]))
@@ -88,6 +91,41 @@ def pickle_desired_data(desired_data: Dict[str, pd.DataFrame], file_path: str) -
         pickle.dump(desired_data, f)
 
 
+def get_time_desired_commands(data_frame:pd.DataFrame, desired_time:float) -> pd.DataFrame:
+    """
+    Returns a DataFrame of commands where the time is greater than or equal to the desired time.
+    """
+    idx = data_frame[data_frame["t"] >= desired_time].index
+
+    if len(idx) == 0:
+        print("No rows where time is greater than or equal to desired time")
+    else:
+        first = idx[0]
+        df_filtered = data_frame.loc[first:]
+        print(df_filtered)
+        
+    return df_filtered
+
+
+def save_data_frame_to_csv(data_frame:pd.DataFrame, file_name:str) -> None:
+    """
+    Saves the given DataFrame to a CSV file with the specified file name.
+    
+    Args:
+        data_frame (pd.DataFrame): The DataFrame to be saved.
+        file_name (str): The name of the file to save the DataFrame as.
+    
+    Returns:
+        None
+    """
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    folder = os.path.join(current_dir, "maneuvers")
+    os.makedirs(folder, exist_ok=True)
+    # strip out the binary path if present
+    file_name = os.path.basename(file_name)
+    filepath = os.path.join(folder, str(file_name))
+    data_frame.to_csv(filepath + ".csv", index=False)
+
 def generate_command_data(attitude_data: pd.DataFrame, 
                           throttle_data: pd.DataFrame,
                           dt:float = 0.05,
@@ -110,10 +148,13 @@ def generate_command_data(attitude_data: pd.DataFrame,
 
     """
     len_data = len(attitude_data)
-    time_command = np.arange(0, len_data * dt, dt)
-    desired_roll = np.interp(attitude_data['t'], attitude_data['t'], attitude_data['DesRoll'])
-    desired_pitch = np.interp(attitude_data['t'], attitude_data['t'], attitude_data['DesPitch'])
-    desired_yaw = np.interp(attitude_data['t'], attitude_data['t'], attitude_data['DesYaw'])
+    time_command = attitude_data['t']
+    # desired_roll = np.interp(attitude_data['t'], attitude_data['t'], attitude_data['DesRoll'])
+    # desired_pitch = np.interp(attitude_data['t'], attitude_data['t'], attitude_data['DesPitch'])
+    # desired_yaw = np.interp(attitude_data['t'], attitude_data['t'], attitude_data['DesYaw'])
+    desired_roll = attitude_data['DesRoll']
+    desired_pitch = attitude_data['DesPitch']
+    desired_yaw = attitude_data['DesYaw']
     desired_throttle = np.interp(throttle_data['t'], throttle_data['t'], throttle_data['ThO'])
     # map the throttle based on time 
     mapped_throttle = np.interp(time_command, throttle_data['t'], desired_throttle)
@@ -127,12 +168,14 @@ def generate_command_data(attitude_data: pd.DataFrame,
         'DesThrottle': scaled_throttle
     })
     # 
-    if save_to_csv:
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        folder = os.path.join(current_dir, "maneuvers")
-        os.makedirs(folder, exist_ok=True)
-        filepath = os.path.join(folder, str(file_name))
-        command_data.to_csv(filepath + ".csv", index=False)
+    # if save_to_csv:
+    #     current_dir = os.path.dirname(os.path.abspath(__file__))
+    #     folder = os.path.join(current_dir, "maneuvers")
+    #     os.makedirs(folder, exist_ok=True)
+    #     # strip out the binary path if present
+    #     file_name = os.path.basename(file_name)
+    #     filepath = os.path.join(folder, str(file_name))
+    #     command_data.to_csv(filepath + ".csv", index=False)
 
     return command_data
 
@@ -148,12 +191,42 @@ def make_csv(file_name:str) -> None:
     command: pd.DataFrame = generate_command_data(
         attitude_data=attitude_data,
         throttle_data=throttle_data,
-        dt=0.05,
-        file_name=file_name+"_command_data",
-        save_to_csv=True
+        dt=1/25.0,
+        file_name=flight_parser.full_path+"_command_data",
+        save_to_csv=True    
     )
     
-if __name__ == "__main__":    
-    make_csv("binaries/00000050 - GNC_SID_(EmergencyLanding)")
+    # 2400 for pitch
+    # 2200 for roll
+    # 1000 for climb
+    time_pitch:float = 2400.0
+    time_roll:float = 2230.0
+    time_climb:float = 1000.0
+    command = get_time_desired_commands(command, desired_time=time_roll)
+    save_data_frame_to_csv(command, file_name=flight_parser.full_path+"_command_data")
+    
+    # plot the csv
+    fig, axs = plt.subplots(4, 1, figsize=(10, 8), sharex=True)
+    axs[0].plot(command['t'], command['DesRoll'], label='DesRoll')
+    axs[0].set_ylabel('DesRoll (degrees)')
+    
+    axs[0].legend()
+    axs[1].plot(command['t'], command['DesPitch'], label='DesPitch', color='orange')
+    axs[1].set_ylabel('DesPitch (degrees)')
+    axs[1].legend()
+    
+    axs[2].plot(command['t'], command['DesYaw'], label='DesYaw', color='green')
+    axs[2].set_ylabel('DesYaw (degrees)')
+    axs[2].legend()
+
+    axs[3].plot(command['t'], command['DesThrottle'], label='DesThrottle', color='red')
+    axs[3].set_ylabel('DesThrottle (0-1)')
+    axs[3].set_xlabel('Time (s)')
+    axs[3].legend()
+    plt.tight_layout()
+    plt.show()
+    
+if __name__ == "__main__":
+    make_csv("binaries/00000050-GNC_SID_(EmergencyLanding)")
         
     
