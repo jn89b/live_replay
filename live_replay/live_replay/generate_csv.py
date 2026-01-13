@@ -128,13 +128,65 @@ def generate_command_data(attitude_data: pd.DataFrame,
     })
     # 
     if save_to_csv:
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        folder = os.path.join(current_dir, "maneuvers")
-        os.makedirs(folder, exist_ok=True)
-        filepath = os.path.join(folder, str(file_name))
+        # current_dir = os.path.dirname(os.path.abspath(__file__))
+        # folder = os.path.join(current_dir, "maneuvers")
+        # os.makedirs(folder, exist_ok=True)
+        # filepath = os.path.join(folder, str(file_name))
+        filepath = file_name + "_parsed"
         command_data.to_csv(filepath + ".csv", index=False)
 
     return command_data
+
+def sync_imu_rcou(
+    imu_data: pd.DataFrame,
+    rcou_data: pd.DataFrame,
+    time_col: str = "TimeUS",
+    direction: str = "nearest",
+) -> pd.DataFrame:
+    """
+    Synchronize IMU and RCOU dataframes on time using merge_asof.
+
+    direction: 'nearest', 'backward', or 'forward' for how to match times.
+    """
+
+    # If either is empty, just bail out cleanly
+    if imu_data.empty or rcou_data.empty:
+        print("One of the datasets is empty; returning empty DataFrame.")
+        return pd.DataFrame()
+
+    # Work on copies to avoid mutating original
+    imu = imu_data.copy()
+    rcou = rcou_data.copy()
+
+    # Make sure the time column exists
+    if time_col not in imu.columns or time_col not in rcou.columns:
+        raise KeyError(f"'{time_col}' must be a column in both IMU and RCOU dataframes.")
+
+    # Convert TimeUS (microseconds) to seconds and normalize to start at 0
+    imu["t_s"] = (imu[time_col] - imu[time_col].iloc[0]) * 1e-6
+    rcou["t_s"] = (rcou[time_col] - rcou[time_col].iloc[0]) * 1e-6
+    
+    imu = imu.drop_duplicates(subset="t_s", keep="first")
+    rcou = rcou.drop_duplicates(subset="t_s", keep="first")
+
+    # Sort by time (required for merge_asof)
+    imu = imu.sort_values("t_s").reset_index(drop=True)
+    rcou = rcou.sort_values("t_s").reset_index(drop=True)
+
+    # Merge: each IMU row gets the nearest RCOU row in time
+    synced = pd.merge_asof(
+        imu,
+        rcou,
+        on="t_s",
+        direction=direction,
+        suffixes=("_imu", "_rcou"),
+    )
+    
+    # skip 
+    synced.drop_duplicates(keep="first", subset=["t_s"], inplace=False)
+
+    return synced
+
 
 def make_csv(file_name:str) -> None:
     """
@@ -145,15 +197,32 @@ def make_csv(file_name:str) -> None:
         types=["GPS", "XKF1", "CTUN", "MODE", "IMU", "ATT", "AHR2", "RCIN", "RCOU", "CMD", "ARSP"])
     attitude_data = desired_data.get("ATT", pd.DataFrame())
     throttle_data = desired_data.get("CTUN", pd.DataFrame())
-    command: pd.DataFrame = generate_command_data(
-        attitude_data=attitude_data,
-        throttle_data=throttle_data,
-        dt=0.05,
-        file_name=file_name+"_command_data",
-        save_to_csv=True
+    
+    # IMU data, RCOU data
+    imu_data = desired_data.get("IMU", pd.DataFrame())
+    rcou_data = desired_data.get("RCOU", pd.DataFrame())
+    
+    imu_data.to_csv(file_name + "_imu_data.csv", index=False)
+    rcou_data.to_csv(file_name + "_rcou_data.csv", index=False)
+    
+    synched_data = sync_imu_rcou(
+        imu_data=imu_data,
+        rcou_data=rcou_data,
+        time_col="TimeUS",
+        direction="nearest",
     )
     
+    synched_data.to_csv(file_name + "_synced_imu_rcou_data.csv", index=False)
+    
+    # command: pd.DataFrame = generate_command_data(
+    #     attitude_data=attitude_data,
+    #     throttle_data=throttle_data,
+    #     dt=0.05,
+    #     file_name=file_name+"_command_data",
+    #     save_to_csv=True
+    # )
+    
 if __name__ == "__main__":    
-    make_csv("binaries/00000050 - GNC_SID_(EmergencyLanding)")
+    make_csv("binaries/00000085")
         
     
