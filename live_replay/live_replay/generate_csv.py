@@ -1,228 +1,157 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+from pathlib import Path
+from typing import Dict, List
 import pandas as pd
 import numpy as np
-import pandas as pd
-import matplotlib.pyplot as plt
 import pickle
-import os
 from pymavlink import DFReader
-from typing import List, Optional, Dict
+
 
 
 class FlightParser:
-    def __init__(self,
-                 log_path: str) -> None:
-        self.log_path: str = log_path
-        self.binary_log: str = DFReader.DFReader_binary(
-            filename=log_path)
-        # Peek what’s available:
-        print("Message types present:", sorted(
-            [fmt.name for fmt in self.binary_log.formats.values()]))
-        print("Counts by type (non-zero):",
-              {self.binary_log.id_to_name[i]: c for i, c in enumerate(self.binary_log.counts) if c > 0 and i in self.binary_log.id_to_name})
-        # we do this to reset the log for future reads
+    def __init__(self, bin_path: Path) -> None:
+        self.bin_path = bin_path
+        self.binary_log = DFReader.DFReader_binary(filename=str(bin_path))
+
+        print("Message types present:",
+              sorted(fmt.name for fmt in self.binary_log.formats.values()))
+
         self.binary_log.rewind()
 
-    def add_rel_time(self, df: pd.DataFrame, col="TimeUS") -> pd.DataFrame:
-        """
-        Returns an additional column to the dataframe that contains the relative time in units
-        of seconds 
-
-        Args:
-            df (pd.DataFrame): The input dataframe to which the relative time column will be added.
-            col (str): The name of the column containing the absolute time values.
-
-        Returns:
-            pd.DataFrame: The input dataframe with an additional column "t" containing the relative time in seconds.
-
-        """
-        if df is None or df.empty or col not in df:
+    @staticmethod
+    def add_rel_time(df: pd.DataFrame, col: str = "TimeUS") -> pd.DataFrame:
+        if df.empty or col not in df:
             return df
         df = df.sort_values(col).copy()
         t0 = df[col].iloc[0]
-        df["t"] = (df[col] - t0) / 1e6
+        df["t"] = (df[col] - t0) * 1e-6
         return df
 
-    def get_desired_data(self,
-                         types: List[str]) -> Dict[str, pd.DataFrame]:
+    def extract(
+            self,
+            config: Dict[str, List[str]],
+            add_relative_time: bool = True,
+            ) -> Dict[str, pd.DataFrame]:
         """
-        Args:
-            types (List[str]): A list of message types to extract from the log.
-            The names from the string come from the ardupilot documentation, 
-            refer to https://ardupilot.org/plane/docs/common-downloading-and-analyzing-data-logs-in-mission-planner.html
-            in the Message Details section of the link
-        Returns:
-            Dict[str, pd.DataFrame]: A dictionary of DataFrames, one for each message type.
+        Extract selected message types and columns.
         """
-        if not types:
-            raise ValueError("Types list cannot be empty.")
+        rows = {msg_type: [] for msg_type in config.keys()}
 
-        rows: Dict[str, List[Dict[str, float]]] = {t: [] for t in types}
         while True:
             m = self.binary_log.recv_msg()
             if m is None:
                 break
-            t = m.get_type()
-            if t in types:
-                d = m.to_dict()
-                d["TimeUS"] = getattr(m, "TimeUS", None)
-                d["_t"] = getattr(m, "_timestamp", None)
-                rows[t].append(d)
 
-        dfs = {t: pd.DataFrame(rows[t]) for t in types}
-        for k, df in dfs.items():
-            dfs[k] = self.add_rel_time(df)
+            msg_type = m.get_type()
+            if msg_type not in config:
+                continue
+
+            d = m.to_dict()
+            d["TimeUS"] = getattr(m, "TimeUS", None)
+            rows[msg_type].append(d)
+
+        dfs: Dict[str, pd.DataFrame] = {}
+
+        for msg_type, cols in config.items():
+            df = pd.DataFrame(rows[msg_type])
+            if not df.empty:
+                keep_cols = [c for c in cols if c in df.columns]
+                df = df[keep_cols]
+                if add_relative_time:
+                    df = self.add_rel_time(df)
+            dfs[msg_type] = df
 
         return dfs
-    
-def pickle_desired_data(desired_data: Dict[str, pd.DataFrame], file_path: str) -> None:
+
+def ensure_csv_folder(bin_folder: Path) -> Path:
     """
-    Pickles the desired data dictionary to a specified file path.
-    Data is saved as hashtables of dataframes for each message type.
-    Args:
-        desired_data (Dict[str, pd.DataFrame]): The dictionary of DataFrames to pickle.
-        file_path (str): The file path where the pickled data will be saved.
-    Returns:
-        None
+    Create csv_files folder next to BIN folder.
     """
-    with open(file_path, 'wb') as f:
-        pickle.dump(desired_data, f)
+    csv_dir = bin_folder.parent / "csv_files"
+    csv_dir.mkdir(exist_ok=True)
+    return csv_dir
 
-
-def generate_command_data(attitude_data: pd.DataFrame, 
-                          throttle_data: pd.DataFrame,
-                          dt:float = 0.05,
-                          file_name: str ="command_data",
-                          save_to_csv:bool=False) -> pd.DataFrame:
+def save_dataframes(
+    dfs: Dict[str, pd.DataFrame],
+    output_dir: Path,
+    prefix: str,
+    ) -> None:
     """
-    Generates a roll,pitch,yaw,throttle command dataframe based on the attitude and throttle data.
-    
-    Args:
-        attitude_data (pd.DataFrame): DataFrame containing 't', 'DesRoll', '
-            'DesPitch', 'DesYaw' columns.
-        throttle_data (pd.DataFrame): DataFrame containing 't', 'ThO' columns
-        dt (float): Time step for the command data.
-        file_name (str): Name of the file to save the command data CSV.
-        save_to_csv (bool): Whether to save the generated command data to a CSV file.
-    
-    Returns:
-        pd.DataFrame: DataFrame containing the generated command data with columns
-            't', 'DesRoll', 'DesPitch', 'DesYaw', 'DesThrottle'.
-
+    Save each dataframe to its own CSV.
     """
-    len_data = len(attitude_data)
-    time_command = np.arange(0, len_data * dt, dt)
-    desired_roll = np.interp(attitude_data['t'], attitude_data['t'], attitude_data['DesRoll'])
-    desired_pitch = np.interp(attitude_data['t'], attitude_data['t'], attitude_data['DesPitch'])
-    desired_yaw = np.interp(attitude_data['t'], attitude_data['t'], attitude_data['DesYaw'])
-    desired_throttle = np.interp(throttle_data['t'], throttle_data['t'], throttle_data['ThO'])
-    # map the throttle based on time 
-    mapped_throttle = np.interp(time_command, throttle_data['t'], desired_throttle)
-    scaled_throttle = mapped_throttle / 100.0 # reduce to 0 to 1 range
-    # regularize to the attitude time stamps
-    command_data = pd.DataFrame({
-        't': time_command,
-        'DesRoll': desired_roll,
-        'DesPitch': desired_pitch,
-        'DesYaw': desired_yaw,
-        'DesThrottle': scaled_throttle
-    })
-    # 
-    if save_to_csv:
-        # current_dir = os.path.dirname(os.path.abspath(__file__))
-        # folder = os.path.join(current_dir, "maneuvers")
-        # os.makedirs(folder, exist_ok=True)
-        # filepath = os.path.join(folder, str(file_name))
-        filepath = file_name + "_parsed"
-        command_data.to_csv(filepath + ".csv", index=False)
+    for name, df in dfs.items():
+        if df.empty:
+            continue
+        out_file = output_dir / f"{prefix}_{name}.csv"
+        df.to_csv(out_file, index=False)
 
-    return command_data
-
-def sync_imu_rcou(
-    imu_data: pd.DataFrame,
-    rcou_data: pd.DataFrame,
-    time_col: str = "TimeUS",
-    direction: str = "nearest",
-) -> pd.DataFrame:
+def combine_dataframes(
+    dfs: Dict[str, pd.DataFrame],
+    on: str = "TimeUS",
+    ) -> pd.DataFrame:
     """
-    Synchronize IMU and RCOU dataframes on time using merge_asof.
-
-    direction: 'nearest', 'backward', or 'forward' for how to match times.
+    Combine multiple dataframes on a shared time column.
     """
+    combined = None
+    for name, df in dfs.items():
+        if df.empty or on not in df.columns:
+            continue
+        df = df.add_prefix(f"{name}_")
+        df = df.rename(columns={f"{name}_{on}": on})
 
-    # If either is empty, just bail out cleanly
-    if imu_data.empty or rcou_data.empty:
-        print("One of the datasets is empty; returning empty DataFrame.")
-        return pd.DataFrame()
+        combined = df if combined is None else pd.merge_asof(
+            combined.sort_values(on),
+            df.sort_values(on),
+            on=on,
+            direction="nearest",
+        )
 
-    # Work on copies to avoid mutating original
-    imu = imu_data.copy()
-    rcou = rcou_data.copy()
+    return combined if combined is not None else pd.DataFrame()
 
-    # Make sure the time column exists
-    if time_col not in imu.columns or time_col not in rcou.columns:
-        raise KeyError(f"'{time_col}' must be a column in both IMU and RCOU dataframes.")
+def parse_bin(
+    binaries_folder: str,
+    bin_name: str,
+    data_config: Dict[str, List[str]],
+    combine: bool = True,
+    ) -> None:
+    bin_directory = Path(binaries_folder)
+    bin_path = bin_directory / f"{bin_name}.BIN"
 
-    # Convert TimeUS (microseconds) to seconds and normalize to start at 0
-    imu["t_s"] = (imu[time_col] - imu[time_col].iloc[0]) * 1e-6
-    rcou["t_s"] = (rcou[time_col] - rcou[time_col].iloc[0]) * 1e-6
-    
-    imu = imu.drop_duplicates(subset="t_s", keep="first")
-    rcou = rcou.drop_duplicates(subset="t_s", keep="first")
+    if not bin_path.exists():
+        raise FileNotFoundError(bin_path)
 
-    # Sort by time (required for merge_asof)
-    imu = imu.sort_values("t_s").reset_index(drop=True)
-    rcou = rcou.sort_values("t_s").reset_index(drop=True)
+    csv_dir = ensure_csv_folder(bin_directory)
 
-    # Merge: each IMU row gets the nearest RCOU row in time
-    synced = pd.merge_asof(
-        imu,
-        rcou,
-        on="t_s",
-        direction=direction,
-        suffixes=("_imu", "_rcou"),
+    parser = FlightParser(bin_path)
+    data = parser.extract(data_config)
+
+    # Save individual CSVs
+    save_dataframes(data, csv_dir, bin_name)
+
+    # Save combined CSV
+    if combine:
+        combined = combine_dataframes(data)
+        if not combined.empty:
+            combined.to_csv(csv_dir / f"{bin_name}_combined.csv", index=False)
+
+
+if __name__ == "__main__":
+    binaries_folder = "src/live_replay/live_replay/live_replay/binaries"
+    bin_name = "00000091"
+
+    data_config: Dict[str, List[str]] = {
+        "IMU": ["TimeUS", "AccX", "AccY", "AccZ", "GyrX", "GyrY", "GyrZ"],
+        "RCOU": ["TimeUS", "C1", "C2", "C3", "C4"],
+        "ATT": ["TimeUS", "Roll", "Pitch", "Yaw", "DesRoll", "DesPitch", "DesYaw"],
+        "CTUN": ["TimeUS", "ThO"],
+        "GPS": ["TimeUS", "Lat", "Lng", "Alt", "Spd"]
+    }
+
+    parse_bin(
+        binaries_folder=binaries_folder,
+        bin_name=bin_name,
+        data_config=data_config,
+        combine=True,
     )
-    
-    # skip 
-    synced.drop_duplicates(keep="first", subset=["t_s"], inplace=False)
-
-    return synced
-
-
-def make_csv(file_name:str) -> None:
-    """
-    Turn this into a parser to generate the file we want for live replay
-    """
-    flight_parser: FlightParser = FlightParser(log_path=file_name + ".BIN")
-    desired_data: Dict[str, pd.DataFrame] = flight_parser.get_desired_data(
-        types=["GPS", "XKF1", "CTUN", "MODE", "IMU", "ATT", "AHR2", "RCIN", "RCOU", "CMD", "ARSP"])
-    attitude_data = desired_data.get("ATT", pd.DataFrame())
-    throttle_data = desired_data.get("CTUN", pd.DataFrame())
-    
-    # IMU data, RCOU data
-    imu_data = desired_data.get("IMU", pd.DataFrame())
-    rcou_data = desired_data.get("RCOU", pd.DataFrame())
-    
-    imu_data.to_csv(file_name + "_imu_data.csv", index=False)
-    rcou_data.to_csv(file_name + "_rcou_data.csv", index=False)
-    
-    synched_data = sync_imu_rcou(
-        imu_data=imu_data,
-        rcou_data=rcou_data,
-        time_col="TimeUS",
-        direction="nearest",
-    )
-    
-    synched_data.to_csv(file_name + "_synced_imu_rcou_data.csv", index=False)
-    
-    # command: pd.DataFrame = generate_command_data(
-    #     attitude_data=attitude_data,
-    #     throttle_data=throttle_data,
-    #     dt=0.05,
-    #     file_name=file_name+"_command_data",
-    #     save_to_csv=True
-    # )
-    
-if __name__ == "__main__":    
-    make_csv("binaries/00000085")
-        
-    
