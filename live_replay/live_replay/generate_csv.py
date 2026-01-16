@@ -84,7 +84,7 @@ def save_dataframes(
     for name, df in dfs.items():
         if df.empty:
             continue
-        out_file = output_dir / f"{prefix}_{name}.csv"
+        out_file = output_dir / f"BIN{prefix}_{name}.csv"
         df.to_csv(out_file, index=False)
 
 def combine_dataframes(

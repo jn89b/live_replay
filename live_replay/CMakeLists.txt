@@ -50,6 +50,7 @@ install(TARGETS
 ament_python_install_package(${PROJECT_NAME})
 # Install Python executables
 install(PROGRAMS
+  scripts/replay_csv.py
   # scripts/replay_commands.py
   # scripts/client_member_function.py
   # scripts/service_member_function.py
