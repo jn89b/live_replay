@@ -87,6 +87,7 @@ class ReplayCSV(Node):
                 'columns': data_columns,
                 'index': 0,
                 'period': period,
+                't_start': start_time,
                 'publisher': None,
                 'timer': None,
                 'finished': False,
@@ -106,7 +107,7 @@ class ReplayCSV(Node):
             clean_name = self._strip_bin_prefix(fname)
             base_name = clean_name.replace('.csv', '')
 
-            topic_name = f'replay/{base_name}_data'
+            topic_name = f'replay/{base_name}/data'
 
             stream['publisher'] = self.create_publisher(
                 Float64MultiArray,
@@ -145,10 +146,14 @@ class ReplayCSV(Node):
                 rclpy.shutdown()
             return
 
+        # ---- Compute replayed log time ----
+        t = stream['t_start'] + idx * stream['period']
+        
         row = rows[idx]
 
         msg = Float64MultiArray()
-        msg.data = [float(row[col]) for col in stream['columns']]
+        # Time first, then data columns
+        msg.data = [t] + [float(row[col]) for col in stream['columns']]
 
         stream['publisher'].publish(msg)
         stream['index'] += 1

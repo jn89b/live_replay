@@ -2,69 +2,51 @@
 # -*- coding: utf-8 -*-
 
 import numpy as np
+import os
+import pandas as pd
 import pandas as pd
 import matplotlib.pyplot as plt
 
 from signal_processing import ButterworthLowPass_VDT_2O, poly_diff
 
 
-def plot_csv(csv_file, time_col, data_cols,
-             figure_title="CSV Data Plot",
-             figure_size=(10, 3)):
+def remove_duplicate_times(
+    directory: str,
+    filename: str,
+    time_column: str,
+    output_filename: str | None = None
+    ) -> pd.DataFrame:
     """
-    Plot CSV data with one subplot per data column.
+    Remove rows with duplicate time values from a CSV file.
 
-    Parameters
-    ----------
-    csv_file : str
-        Path to CSV file
-    time_col : str
-        Name of the time column
-    data_cols : list[str]
-        List of data column names (one subplot per column)
-    figure_title : str
-        Title for the entire figure
-    figure_size : tuple(float, float)
-        (width, height_per_subplot)
+    Parameters:
+        directory (str): Path to the directory containing the CSV
+        filename (str): Name of the CSV file
+        time_column (str): Column name containing time values
+        output_filename (str | None): If provided, save to this file.
+                                      If None, overwrite the original file.
     """
+    file_path = os.path.join(directory, filename)
 
-    # Load data
-    df = pd.read_csv(csv_file)
+    # Load CSV
+    df = pd.read_csv(file_path)
 
-    # Validate columns
-    if time_col not in df.columns:
-        raise ValueError(f"Time column '{time_col}' not found in CSV.")
+    if time_column not in df.columns:
+        raise ValueError(f"Column '{time_column}' not found in CSV")
 
-    for col in data_cols:
-        if col not in df.columns:
-            raise ValueError(f"Data column '{col}' not found in CSV.")
+    # Remove duplicate time values (keep first occurrence)
+    df_cleaned = df.drop_duplicates(subset=time_column, keep="first")
 
-    # Create subplots
-    n = len(data_cols)
-    fig, axes = plt.subplots(
-        n,
-        1,
-        sharex=True,
-        figsize=(figure_size[0], figure_size[1] * n)
-    )
+    # Determine output path
+    if output_filename is None:
+        output_path = file_path
+    else:
+        output_path = os.path.join(directory, output_filename)
 
-    # Ensure axes is iterable for single subplot
-    if n == 1:
-        axes = [axes]
+    # Save cleaned CSV
+    df_cleaned.to_csv(output_path, index=False)
 
-    # Plot each data column
-    for ax, col in zip(axes, data_cols):
-        ax.scatter(df[time_col], df[col], alpha=0.7, marker='.')
-        ax.plot(df[time_col], df[col], alpha=0.3)
-        ax.set_ylabel(col)
-        ax.grid(True)
-
-    axes[-1].set_xlabel(time_col)
-    fig.suptitle(figure_title, fontsize=14)
-
-    plt.tight_layout()
-    plt.show()
-
+    return df_cleaned
 
 def apply_butterworth_vdt(
     time: np.ndarray,
@@ -113,7 +95,6 @@ def apply_butterworth_vdt(
         prev_t = t
 
     return filtered
-
 def differentiate_signal_poly(
     time: np.ndarray,
     data: np.ndarray,
@@ -187,7 +168,6 @@ def differentiate_signal_poly(
         )
 
     return derivative
-
 def add_accels(csv_directory, csv_name):
     df = pd.read_csv(csv_directory + csv_name)
     columns_to_keep = [
@@ -217,16 +197,83 @@ def add_accels(csv_directory, csv_name):
 
     new_df.to_csv(csv_directory + "added_accels.csv", index=False)
 
+def plot_csv(csv_file, time_col, data_cols,
+             figure_title="CSV Data Plot",
+             figure_size=(10, 3)):
+    """
+    Plot CSV data with one subplot per data column.
 
-if __name__ == "__main__":
-    csv_folder = "/develop_ws/src/live_replay/live_replay/live_replay/csv_files/"
+    Parameters
+    ----------
+    csv_file : str
+        Path to CSV file
+    time_col : str
+        Name of the time column
+    data_cols : list[str]
+        List of data column names (one subplot per column)
+    figure_title : str
+        Title for the entire figure
+    figure_size : tuple(float, float)
+        (width, height_per_subplot)
+    """
+
+    # Load data
+    df = pd.read_csv(csv_file)
+
+    # Validate columns
+    if time_col not in df.columns:
+        raise ValueError(f"Time column '{time_col}' not found in CSV.")
+
+    for col in data_cols:
+        if col not in df.columns:
+            raise ValueError(f"Data column '{col}' not found in CSV.")
+
+    # Create subplots
+    n = len(data_cols)
+    fig, axes = plt.subplots(
+        n,
+        1,
+        sharex=True,
+        figsize=(figure_size[0], figure_size[1] * n)
+    )
+
+    # Ensure axes is iterable for single subplot
+    if n == 1:
+        axes = [axes]
+
+    # Plot each data column
+    for ax, col in zip(axes, data_cols):
+        ax.scatter(df[time_col], df[col], alpha=0.7, marker='.')
+        ax.plot(df[time_col], df[col], alpha=0.3)
+        ax.set_ylabel(col)
+        ax.grid(True)
+
+    axes[-1].set_xlabel(time_col)
+    fig.suptitle(figure_title, fontsize=14)
+
+    plt.tight_layout()
+    plt.show()
+
+
+def _removing_duplicates(csv_folder):
+    filename = "BIN00000091_IMU" + ".csv"
+    time_column = "t"
+    output_filename = filename
+
+    remove_duplicate_times(directory=csv_folder,
+                           filename=filename,
+                           time_column=time_column,
+                           output_filename=output_filename)
+
+def _adding_accels(csv_folder):
     csv_file = "00000091_combined.csv"
 
-    # add_accels(
-    #     csv_directory=csv_folder,
-    #     csv_name=csv_file
-    # )
-    
+    add_accels(
+        csv_directory=csv_folder,
+        csv_name=csv_file
+    )
+
+def _plotting(csv_folder):
     csv_file = "added_accels.csv"
     time_col = "IMU_t"
     data_cols = [
@@ -266,3 +313,11 @@ if __name__ == "__main__":
         time_col=time_col,
         data_cols=data_cols,
     )
+
+
+if __name__ == "__main__":
+    csv_folder = "/develop_ws/src/live_replay/live_replay/live_replay/csv_files/"
+
+    _removing_duplicates(csv_folder)
+    # _adding_accels(csv_folder)
+    # _plotting(csv_folder)
