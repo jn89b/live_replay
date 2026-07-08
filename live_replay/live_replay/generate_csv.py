@@ -135,18 +135,23 @@ def parse_bin(
         combined = combine_dataframes(data)
         if not combined.empty:
             combined.to_csv(csv_dir / f"{bin_name}_combined.csv", index=False)
-
+            print(f"Combined CSV saved to {csv_dir / f'{bin_name}_combined.csv'}")
+        else:
+            print("No data to combine.")
 
 if __name__ == "__main__":
-    binaries_folder = "src/live_replay/live_replay/live_replay/binaries"
-    bin_name = "00000091"
+    binaries_folder = "/develop_ws/src/live_replay/live_replay/live_replay/binaries"
+    bin_name = "00000041"
 
     data_config: Dict[str, List[str]] = {
         "IMU": ["TimeUS", "AccX", "AccY", "AccZ", "GyrX", "GyrY", "GyrZ"],
         "RCOU": ["TimeUS", "C1", "C2", "C3", "C4"],
         "ATT": ["TimeUS", "Roll", "Pitch", "Yaw", "DesRoll", "DesPitch", "DesYaw"],
         "CTUN": ["TimeUS", "ThO"],
-        "GPS": ["TimeUS", "Lat", "Lng", "Alt", "Spd"]
+        "GPS": ["TimeUS", "Lat", "Lng", "Alt", "Spd"],
+        "XKQ": ["TimeUS", "Q1", "Q2", "Q3", "Q4"],
+        "AHR2": ["TimeUS", "Roll", "Pitch", "Yaw", "Alt", "Lat", "Lng", "Q1", "Q2", "Q3", "Q4"],
+        "XKF1": ["TimeUS", "Roll", "Pitch", "Yaw", "PN", "PE", "PD", "VN", "VE", "VD"],
     }
 
     parse_bin(

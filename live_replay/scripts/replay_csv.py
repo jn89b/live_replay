@@ -32,8 +32,8 @@ class ReplayCSV(Node):
         # Explicit list of CSVs you want replayed
         # NOTE: File names cannot start with numbers because the file names become variable names later in the script.
         self.requested_csvs = [
-            'BIN00000091_IMU.csv',
-            'BIN00000091_RCOU.csv',
+            'BIN00000041_IMU.csv',
+            'BIN00000041_RCOU.csv',
         ]
 
         self.csv_streams = {}
